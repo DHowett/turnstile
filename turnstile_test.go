@@ -156,6 +156,53 @@ func TestExtendBan(t *testing.T) {
 	}
 }
 
+func TestUnlimited(t *testing.T) {
+	t.Parallel()
+	var then CountedTurnstileHandler
+	th := Allow(Unlimited).Per(1*time.Second).Then(&then, ExtendBan(5*time.Second))
+
+	th.ServeHTTP(nil, fakeRequest)
+	th.ServeHTTP(nil, fakeRequest)
+	th.ServeHTTP(nil, fakeRequest)
+	if then > 0 {
+		t.Error("unlimited turnstile triggered?")
+	}
+
+	th.ServeHTTP(nil, fakeRequest)
+	if then > 0 {
+		t.Error("unlimited turnstile triggered?")
+	}
+
+	th.ServeHTTP(nil, fakeRequest)
+	if then > 0 {
+		t.Error("unlimited turnstile triggered?")
+	}
+}
+
+func TestToOnly(t *testing.T) {
+	t.Parallel()
+	var httpHandler CountedHTTPHandler
+	th := To(&httpHandler)
+
+	th.ServeHTTP(nil, fakeRequest)
+	th.ServeHTTP(nil, fakeRequest)
+	if httpHandler < 2 {
+		t.Error("didn't call through to handler-only turnstile handler.")
+	}
+}
+
+func TestPerToOnly(t *testing.T) {
+	t.Parallel()
+	var httpHandler CountedHTTPHandler
+	th := Per(1 * time.Second).To(&httpHandler)
+
+	th.ServeHTTP(nil, fakeRequest)
+	th.ServeHTTP(nil, fakeRequest)
+	if httpHandler < 2 {
+		t.Error("didn't call through to handler-only turnstile handler.")
+	}
+}
+
 /*
 func TestExtendBanWithoutTimeComponent(t *testing.T) {
 	var then CountedTurnstileHandler
