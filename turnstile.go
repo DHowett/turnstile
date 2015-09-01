@@ -11,6 +11,9 @@ import (
 // Unlimited represents an unlimited number of accesses to a Turnstile.
 const Unlimited = ^uint(0)
 
+// Ever represents all that ever was or will be. Turnstiles set to Per(Ever) will never re-open once closed.
+const Ever = time.Duration(0)
+
 // Remote is a convenience type representing a remote address.
 type Remote string
 
@@ -94,7 +97,7 @@ func (th *tsState) count(p *Turnstile, r *http.Request) {
 		th.rejections[remote] = struct{}{}
 	}
 
-	if p.per != time.Duration(0) {
+	if p.per > Ever {
 		th.expire(remote, p.per)
 	}
 }
