@@ -1,6 +1,7 @@
 package turnstile
 
 import (
+	"fmt"
 	"net/http"
 	"testing"
 	"time"
@@ -237,4 +238,26 @@ func BenchmarkServeHTTP(b *testing.B) {
 	for i := 0; i < b.N; i++ {
 		th.ServeHTTP(nil, fakeRequest)
 	}
+}
+
+func Example() {
+	request := &http.Request{RemoteAddr: "decoy"}
+	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		fmt.Println("handler called.")
+	})
+	emitLog := TurnstileFunc(func(h http.Handler, w http.ResponseWriter, r *http.Request) {
+		fmt.Println("turnstile closed!")
+	})
+
+	ts := Allow(2).To(handler).Then(emitLog)
+
+	ts.ServeHTTP(nil, request)
+	ts.ServeHTTP(nil, request)
+	ts.ServeHTTP(nil, request)
+	ts.ServeHTTP(nil, request)
+
+	// Output: handler called.
+	// handler called.
+	// turnstile closed!
+	// turnstile closed!
 }
