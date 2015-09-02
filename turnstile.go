@@ -2,8 +2,8 @@
 package turnstile
 
 import (
-	//"log"
 	"net/http"
+	"strings"
 	"sync"
 	"time"
 )
@@ -56,7 +56,8 @@ func (th *tsState) remoteFrom(r *http.Request) Remote {
 	if th.remotesFromFunc != nil {
 		return th.remotesFromFunc(r)
 	}
-	return Remote(r.RemoteAddr)
+	components := strings.Split(r.RemoteAddr, ":")
+	return Remote(strings.Join(components[:len(components)-1], ":"))
 }
 
 func (th *tsState) expire(remote Remote, dur time.Duration) {
