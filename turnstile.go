@@ -52,14 +52,6 @@ func (th *tsState) reapRemotes() {
 	}
 }
 
-func (th *tsState) remoteFrom(r *http.Request) Remote {
-	if th.remotesFromFunc != nil {
-		return th.remotesFromFunc(r)
-	}
-	components := strings.Split(r.RemoteAddr, ":")
-	return Remote(strings.Join(components[:len(components)-1], ":"))
-}
-
 func (th *tsState) expire(remote Remote, dur time.Duration) {
 	tsh, ok := th.remotes[remote]
 	if !ok {
@@ -77,9 +69,8 @@ func (th *tsState) expire(remote Remote, dur time.Duration) {
 
 }
 
-func (th *tsState) count(p *Turnstile, r *http.Request) {
+func (th *tsState) count(p *Turnstile, remote Remote) {
 	th.init()
-	remote := th.remoteFrom(r)
 
 	th.mtx.Lock()
 	defer th.mtx.Unlock()
@@ -103,7 +94,7 @@ func (th *tsState) count(p *Turnstile, r *http.Request) {
 	}
 }
 
-func (th *tsState) allow(p *Turnstile, r *http.Request) bool {
+func (th *tsState) allow(p *Turnstile, remote Remote) bool {
 	if p.count == Unlimited {
 		return true
 	}
@@ -112,7 +103,7 @@ func (th *tsState) allow(p *Turnstile, r *http.Request) bool {
 	th.mtx.Lock()
 	defer th.mtx.Unlock()
 
-	_, rejected := th.rejections[th.remoteFrom(r)]
+	_, rejected := th.rejections[remote]
 	return !rejected
 }
 
@@ -129,27 +120,36 @@ func (tf TurnstileFunc) Reject(h http.Handler, w http.ResponseWriter, r *http.Re
 }
 
 type statefulTurnstileHandler struct {
-	state *tsState
-	f     func(*tsState, http.Handler, http.ResponseWriter, *http.Request)
+	ts *Turnstile
+	f  func(*Turnstile, http.Handler, http.ResponseWriter, *http.Request)
 }
 
 func (sh *statefulTurnstileHandler) Reject(h http.Handler, w http.ResponseWriter, r *http.Request) {
-	sh.f(sh.state, h, w, r)
+	sh.f(sh.ts, h, w, r)
 }
 
 // A Turnstile is an immutable structure that implements counted access control to HTTP handlers.
 // It is, itself, a http.Handler.
 type Turnstile struct {
-	state     *tsState
-	count     uint
-	per       time.Duration
-	h         http.Handler
-	then      []TurnstileHandler
-	following *Turnstile
+	state           *tsState
+	count           uint
+	per             time.Duration
+	h               http.Handler
+	then            []TurnstileHandler
+	following       *Turnstile
+	remotesFromFunc RemoteFunc
 }
 
 func newTurnstile() *Turnstile {
 	return &Turnstile{state: new(tsState)}
+}
+
+func (p *Turnstile) remoteFrom(r *http.Request) Remote {
+	if p.remotesFromFunc != nil {
+		return p.remotesFromFunc(r)
+	}
+	components := strings.Split(r.RemoteAddr, ":")
+	return Remote(strings.Join(components[:len(components)-1], ":"))
 }
 
 // Allow returns a new Turnstile that allows the specified number of accesses.
@@ -205,26 +205,35 @@ func (p *Turnstile) Follower() *Turnstile {
 	}
 }
 
-func (p *Turnstile) allow(r *http.Request) bool {
+// RemotesFrom returns a new Turnstile that determines the remote end of a connection by using the provided function.
+func (p *Turnstile) RemotesFrom(from RemoteFunc) *Turnstile {
+	n := *p
+	n.remotesFromFunc = from
+	return &n
+}
+
+func (p *Turnstile) allow(remote Remote) bool {
 	v := true
-	v = v && p.state.allow(p, r)
+	v = v && p.state.allow(p, remote)
 	if p.following != nil {
-		v = v && p.following.allow(r)
+		v = v && p.following.allow(remote)
 	}
 	return v
 }
 
 // ServeHTTP is provided for conformance with the http.Handler interface.
 func (p *Turnstile) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	remote := p.remoteFrom(r)
+
 	if p.count != Unlimited {
-		p.state.count(p, r)
+		p.state.count(p, remote)
 	}
 
-	if !p.allow(r) && len(p.then) > 0 {
+	if !p.allow(remote) && len(p.then) > 0 {
 		for _, th := range p.then {
 			// Inject state if necessary
 			if sth, ok := th.(*statefulTurnstileHandler); ok {
-				sth.state = p.state
+				sth.ts = p
 			}
 			th.Reject(p.h, w, r)
 		}
@@ -249,10 +258,11 @@ func deny(h http.Handler, w http.ResponseWriter, r *http.Request) {
 // A remote will be reconsidered for requests d duration after its *last* request.
 func ExtendBan(d time.Duration) TurnstileHandler {
 	return &statefulTurnstileHandler{
-		f: func(state *tsState, h http.Handler, w http.ResponseWriter, r *http.Request) {
-			state.mtx.Lock()
-			state.expire(state.remoteFrom(r), d)
-			state.mtx.Unlock()
+		f: func(ts *Turnstile, h http.Handler, w http.ResponseWriter, r *http.Request) {
+			// Flagrant violation of the law of demeter
+			ts.state.mtx.Lock()
+			ts.state.expire(ts.remoteFrom(r), d)
+			ts.state.mtx.Unlock()
 		},
 	}
 }
