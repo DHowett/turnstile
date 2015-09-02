@@ -120,6 +120,7 @@ func TestFollowing(t *testing.T) {
 	follower := th.Follower().Then(&then)
 
 	th.ServeHTTP(nil, fakeRequest)
+	th.ServeHTTP(nil, fakeRequest)
 	if then > 0 {
 		t.Error("'Then' was called on followee?!")
 	}
