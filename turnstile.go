@@ -9,7 +9,7 @@ import (
 )
 
 // Unlimited represents an unlimited number of accesses to a Turnstile.
-const Unlimited = ^uint(0)
+const Unlimited = uint(0)
 
 // Ever represents all that ever was or will be. Turnstiles set to Per(Ever) will never re-open once closed.
 const Ever = time.Duration(0)
